@@ -76,9 +76,10 @@ type MetricsResponse struct {
 }
 
 func (r *Repo) GetMetrics(ctx context.Context, req MetricsRequest) (*MetricsResponse, error) {
-	_, err := session.FromContext(ctx).GetWorkspace(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workspace: %w", err)
+	if sess := session.FromContext(ctx); sess != nil {
+		if _, err := sess.GetWorkspace(ctx); err != nil {
+			return nil, fmt.Errorf("failed to get workspace: %w", err)
+		}
 	}
 
 	response := &MetricsResponse{

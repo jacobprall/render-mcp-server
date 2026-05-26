@@ -11,12 +11,14 @@ import (
 )
 
 func main() {
-	// Define and parse command line flags
 	versionFlag := flag.Bool("version", false, "Print version information and exit")
 	flag.BoolVar(versionFlag, "v", false, "Print version information and exit")
 
 	var transport string
 	flag.StringVarP(&transport, "transport", "t", "stdio", "Transport type (stdio or http)")
+
+	var mode string
+	flag.StringVarP(&mode, "mode", "m", "both", "Tool mode: sre (new tools), api (legacy 24 tools), both (all)")
 
 	flag.Parse()
 
@@ -25,6 +27,5 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Start the server
-	cmd.Serve(transport)
+	cmd.Serve(transport, mode)
 }

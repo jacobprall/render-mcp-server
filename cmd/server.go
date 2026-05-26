@@ -20,10 +20,23 @@ import (
 	"github.com/render-oss/render-mcp-server/pkg/postgres"
 	"github.com/render-oss/render-mcp-server/pkg/service"
 	"github.com/render-oss/render-mcp-server/pkg/session"
+	"github.com/render-oss/render-mcp-server/pkg/sre"
 )
 
-func Serve(transport string) *server.MCPServer {
-	// Create MCP server
+type Mode string
+
+const (
+	ModeSRE  Mode = "sre"
+	ModeAPI  Mode = "api"
+	ModeBoth Mode = "both"
+)
+
+func Serve(transport string, mode string) *server.MCPServer {
+	m := Mode(mode)
+	if m != ModeSRE && m != ModeAPI && m != ModeBoth {
+		log.Fatalf("invalid mode %q: must be one of sre, api, both", mode)
+	}
+
 	s := server.NewMCPServer(
 		"render-mcp-server",
 		cfg.Version,
@@ -31,17 +44,16 @@ func Serve(transport string) *server.MCPServer {
 
 	c, err := client.NewDefaultClient()
 	if err != nil {
-		// TODO: We can't create a client unless we're logged in, so we should handle that error case.
 		panic(err)
 	}
 
-	s.AddTools(owner.Tools(c)...)
-	s.AddTools(service.Tools(c)...)
-	s.AddTools(deploy.Tools(c)...)
-	s.AddTools(postgres.Tools(c)...)
-	s.AddTools(keyvalue.Tools(c)...)
-	s.AddTools(logs.Tools(c)...)
-	s.AddTools(metrics.Tools(c)...)
+	if m == ModeAPI || m == ModeBoth {
+		registerAPITools(s, c)
+	}
+
+	if m == ModeSRE || m == ModeBoth {
+		registerSRETools(s, c)
+	}
 
 	if transport == "http" {
 		var sessionStore session.Store
@@ -90,4 +102,19 @@ func Serve(transport string) *server.MCPServer {
 	}
 
 	return s
+}
+
+func registerAPITools(s *server.MCPServer, c *client.ClientWithResponses) {
+	s.AddTools(owner.Tools(c)...)
+	s.AddTools(service.Tools(c)...)
+	s.AddTools(deploy.Tools(c)...)
+	s.AddTools(postgres.Tools(c)...)
+	s.AddTools(keyvalue.Tools(c)...)
+	s.AddTools(logs.Tools(c)...)
+	s.AddTools(metrics.Tools(c)...)
+}
+
+func registerSRETools(s *server.MCPServer, c *client.ClientWithResponses) {
+	s.AddTools(sre.Tools(c)...)
+	sre.AddResources(s, c)
 }
