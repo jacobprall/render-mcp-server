@@ -12,5 +12,9 @@ type Session interface {
 }
 
 func FromContext(ctx context.Context) Session {
-	return ctx.Value(sessionCtxKey).(Session)
+	val := ctx.Value(sessionCtxKey)
+	if val == nil {
+		return nil
+	}
+	return val.(Session)
 }
