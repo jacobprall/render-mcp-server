@@ -23,9 +23,9 @@ func Tools(c *client.ClientWithResponses) []server.ServerTool {
 		createWebService(serviceRepo),
 		createStaticSite(serviceRepo),
 		createCronJob(serviceRepo),
-		updateWebService(),
+		updateWebService(serviceRepo),
 		updateStaticSite(),
-		updateCronJob(),
+		updateCronJob(serviceRepo),
 		updateEnvVars(serviceRepo),
 	}
 }
@@ -111,7 +111,7 @@ func createWebService(serviceRepo *Repo) server.ServerTool {
 			mcp.WithDescription("Create a new web service in your Render account. "+
 				"A web service is a public-facing service that can be accessed by users on the internet. "+
 				"By default, these services are automatically deployed when the specified branch is updated "+
-				"and do not require a manual trigger of a deploy. The user should only be prompted to manually trigger a deploy if auto-deploy is disabled."+
+				"and do not require a manual trigger of a deploy. Only prompt to manually trigger a deploy if auto-deploy is disabled."+
 				"This tool is currently limited to support only a subset of the web service configuration parameters."+
 				"It also only supports web services which don't use Docker, or a container registry."+
 				"To create a service without those limitations, please use the dashboard at: "+config.DashboardURL()+"/web/new"),
@@ -589,20 +589,32 @@ func createValidatedCronJobRequest(ctx context.Context, request mcp.CallToolRequ
 	return validatedCreateServiceRequest(ctx, request, client.CronJob, &serviceDetails)
 }
 
-func updateWebService() server.ServerTool {
+func updateWebService(serviceRepo *Repo) server.ServerTool {
 	return server.ServerTool{
 		Tool: mcp.NewTool("update_web_service",
-			mcp.WithDescription("Update an existing web service in your Render account."),
+			mcp.WithDescription("Update the compute plan (instance type) of an existing web service in your Render account. "+
+				"Changing the plan scales the service's CPU and memory. This triggers a new deploy to apply the new "+
+				"instance type, so no manual deploy is needed. The deploy is zero-downtime for stateless services; "+
+				"services with an attached persistent disk briefly go down during the switch. "+
+				"This tool currently only supports changing the plan, and does not support transitioning to or from "+
+				"the free plan (use the dashboard for free-tier changes). For other configuration changes, "+
+				"use the dashboard at: "+config.DashboardURL()+"/web/new"),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:           "Update web service",
-				ReadOnlyHint:    pointers.From(true),
+				ReadOnlyHint:    pointers.From(false),
 				DestructiveHint: pointers.From(false),
 				IdempotentHint:  pointers.From(true),
-				OpenWorldHint:   pointers.From(false),
+				OpenWorldHint:   pointers.From(true),
 			}),
 			mcp.WithString("serviceId",
 				mcp.Required(),
-				mcp.Description("The ID of the service to update"),
+				mcp.Description("The ID of the web service to update"),
+			),
+			mcp.WithString("plan",
+				mcp.Required(),
+				mcp.Description("The new pricing plan for your web service. Different plans offer different levels of resources. "+
+					"The free plan is not supported here; transitioning to or from the free tier must be done via the dashboard."),
+				mcp.Enum(mcpserver.PaidServicePlanEnumValues()...),
 			),
 		),
 		Handler: func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -611,10 +623,46 @@ func updateWebService() server.ServerTool {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			// Return a message indicating direct updates are not supported via MCP server
-			return mcp.NewToolResultText(
-				"Updating a service directly is not supported. Please make changes using the dashboard or the API.\n\n" +
-					"Dashboard URL: " + config.DashboardURL() + "/web/" + serviceId + "/settings"), nil
+			plan, err := validate.RequiredToolParam[string](request, "plan")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			servicePlan, err := validate.PaidServicePlan(plan)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			serviceDetails := client.ServicePATCH_ServiceDetails{}
+			if err = serviceDetails.FromWebServiceDetailsPATCH(client.WebServiceDetailsPATCH{Plan: servicePlan}); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			body := client.UpdateServiceJSONRequestBody{ServiceDetails: &serviceDetails}
+			updated, err := serviceRepo.UpdateService(ctx, serviceId, client.WebService, body)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// The Render API records the new plan but does not apply it until the next
+			// successful deploy, so trigger one. This is zero-downtime for stateless
+			// services; services with an attached persistent disk briefly go down.
+			deployResponse, err := serviceRepo.DeployService(ctx, serviceId)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			respJSON, err := json.Marshal(updated)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			responseText := "Compute plan updated. A new deploy has been triggered to apply the new instance type. " +
+				"This is a zero-downtime change for stateless services; services with an attached persistent disk " +
+				"briefly go down during the switch.\n\n" +
+				"Updated service: " + string(respJSON) + "\n\n" +
+				"Response from deploying service: " + string(deployResponse.Body)
+
+			return mcp.NewToolResultText(responseText), nil
 		},
 	}
 }
@@ -649,20 +697,31 @@ func updateStaticSite() server.ServerTool {
 	}
 }
 
-func updateCronJob() server.ServerTool {
+func updateCronJob(serviceRepo *Repo) server.ServerTool {
 	return server.ServerTool{
 		Tool: mcp.NewTool("update_cron_job",
-			mcp.WithDescription("Update an existing cron job in your Render account."),
+			mcp.WithDescription("Update the compute plan (instance type) of an existing cron job in your Render account. "+
+				"Changing the plan scales the CPU and memory available to each run. This triggers a new deploy to apply "+
+				"the new instance type, so no manual deploy is needed. The new plan takes effect on the cron job's next run. "+
+				"This tool currently only supports changing the plan, and does not support transitioning to or from "+
+				"the free plan (use the dashboard for free-tier changes). For other configuration changes, "+
+				"use the dashboard at: "+config.DashboardURL()+"/create"),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:           "Update cron job",
-				ReadOnlyHint:    pointers.From(true),
+				ReadOnlyHint:    pointers.From(false),
 				DestructiveHint: pointers.From(false),
 				IdempotentHint:  pointers.From(true),
-				OpenWorldHint:   pointers.From(false),
+				OpenWorldHint:   pointers.From(true),
 			}),
 			mcp.WithString("serviceId",
 				mcp.Required(),
-				mcp.Description("The ID of the service to update"),
+				mcp.Description("The ID of the cron job to update"),
+			),
+			mcp.WithString("plan",
+				mcp.Required(),
+				mcp.Description("The new pricing plan for your cron job. Different plans offer different levels of resources. "+
+					"The free plan is not supported here; transitioning to or from the free tier must be done via the dashboard."),
+				mcp.Enum(mcpserver.PaidServicePlanEnumValues()...),
 			),
 		),
 		Handler: func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -671,10 +730,44 @@ func updateCronJob() server.ServerTool {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			// Return a message indicating direct updates are not supported via MCP server
-			return mcp.NewToolResultText(
-				"Updating a cron job directly is not supported. Please make changes using the dashboard or the API.\n\n" +
-					"Dashboard URL: " + config.DashboardURL() + "/cron/" + serviceId + "/settings"), nil
+			plan, err := validate.RequiredToolParam[string](request, "plan")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			servicePlan, err := validate.PaidServicePlan(plan)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			serviceDetails := client.ServicePATCH_ServiceDetails{}
+			if err = serviceDetails.FromCronJobDetailsPATCH(client.CronJobDetailsPATCH{Plan: servicePlan}); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			body := client.UpdateServiceJSONRequestBody{ServiceDetails: &serviceDetails}
+			updated, err := serviceRepo.UpdateService(ctx, serviceId, client.CronJob, body)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// The Render API records the new plan but does not apply it until the next
+			// successful deploy, so trigger one. The new plan takes effect on the next run.
+			deployResponse, err := serviceRepo.DeployService(ctx, serviceId)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			respJSON, err := json.Marshal(updated)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			responseText := "Compute plan updated. A new deploy has been triggered to apply the new instance type, " +
+				"which takes effect on the cron job's next run.\n\n" +
+				"Updated service: " + string(respJSON) + "\n\n" +
+				"Response from deploying service: " + string(deployResponse.Body)
+
+			return mcp.NewToolResultText(responseText), nil
 		},
 	}
 }

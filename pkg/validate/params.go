@@ -136,6 +136,22 @@ func ServicePlan(plan string) (*client.PaidPlan, error) {
 	return nil, fmt.Errorf("invalid service plan: %s", plan)
 }
 
+// PaidServicePlan validates a plan for updating an existing service's compute
+// plan. It rejects the free tier because the public API does not support
+// transitioning an existing service to or from the free tier via the
+// update-service endpoint.
+func PaidServicePlan(plan string) (*client.PaidPlan, error) {
+	paidPlan := client.PaidPlan(plan)
+	if slices.Contains(mcpserver.ValidPaidServicePlanValues, paidPlan) {
+		return &paidPlan, nil
+	}
+	if paidPlan == client.PaidPlan("free") {
+		return nil, fmt.Errorf("updating a service to or from the free plan is not supported via the API; " +
+			"please use the dashboard to change free-tier status")
+	}
+	return nil, fmt.Errorf("invalid service plan: %s", plan)
+}
+
 func KeyValuePlan(plan string) (*client.KeyValuePlan, error) {
 	switch client.KeyValuePlan(plan) {
 	case client.KeyValuePlanFree, client.KeyValuePlanStarter, client.KeyValuePlanStandard, client.KeyValuePlanPro, client.KeyValuePlanProPlus:

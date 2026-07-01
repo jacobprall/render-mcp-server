@@ -15,6 +15,19 @@ var ValidServicePlanValues = []client.PaidPlan{
 	client.PaidPlanProUltra,
 }
 
+// ValidPaidServicePlanValues is the set of plans that can be set when updating
+// an existing service's compute plan. It excludes the free tier because the
+// public API rejects transitions to or from the free tier via the update-service
+// endpoint (those must be done through the dashboard).
+var ValidPaidServicePlanValues = []client.PaidPlan{
+	client.PaidPlanStarter,
+	client.PaidPlanStandard,
+	client.PaidPlanPro,
+	client.PaidPlanProPlus,
+	client.PaidPlanProMax,
+	client.PaidPlanProUltra,
+}
+
 func RegionEnumValues() []string {
 	return EnumValuesFromClientType(
 		client.Oregon,
@@ -27,6 +40,10 @@ func RegionEnumValues() []string {
 
 func ServicePlanEnumValues() []string {
 	return EnumValuesFromClientType(ValidServicePlanValues...)
+}
+
+func PaidServicePlanEnumValues() []string {
+	return EnumValuesFromClientType(ValidPaidServicePlanValues...)
 }
 
 func PostgresPlanEnumValues() []string {
