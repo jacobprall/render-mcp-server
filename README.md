@@ -29,6 +29,9 @@ Please leave feedback via
 [filing a GitHub issue](https://github.com/render-oss/render-mcp-server/issues) if you have any
 feature requests, bug reports, suggestions, comments, or concerns.
 
+For security vulnerabilities, please do not file a public issue; see [SECURITY.md](SECURITY.md)
+for how to report them.
+
 ## Tools
 
 ### Workspaces
